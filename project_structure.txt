@@ -1,0 +1,15 @@
+semantic_search/
+├── core/
+│   ├── __init__.py
+│   ├── document_processor.py    # 文档处理模块
+│   ├── embedding.py            # 语义嵌入模块
+│   ├── vector_store.py         # 向量存储模块
+│   └── search_service.py       # 搜索服务模块
+├── ui/
+│   ├── __init__.py
+│   └── main_window.py          # 主界面
+├── utils/
+│   ├── __init__.py
+│   └── config.py               # 配置管理
+├── requirements.txt            # 依赖管理
+└── main.py                     # 程序入口 
