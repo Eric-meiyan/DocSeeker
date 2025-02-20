@@ -6,10 +6,12 @@ from .document_processor import DocumentProcessor
 from .embedding import EmbeddingService
 from .vector_store import VectorStore
 from .search_service import SearchService
+from .workers import IndexingWorker
 
 __all__ = [
     'DocumentProcessor',
     'EmbeddingService',
     'VectorStore',
-    'SearchService'
+    'SearchService',
+    'IndexingWorker'
 ] 

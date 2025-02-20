@@ -4,17 +4,22 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLineEdit, QPushButton, QTextEdit, QListWidget, 
-                            QFileDialog, QProgressBar, QMessageBox, QLabel)
+                            QFileDialog, QProgressBar, QMessageBox, QLabel,
+                            QApplication)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon
 from typing import List, Dict
 from core.search_service import SearchService
+from core.workers import IndexingWorker
 from utils.config import Config
 from utils.file_monitor import FileMonitor
-from .workers import IndexingWorker
+from utils.logger import Logger
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.logger = Logger.get_logger(__name__)
+        self.logger.info("初始化主窗口")
         self.config = Config()
         self.search_service = SearchService()
         self.init_ui()
@@ -33,8 +38,10 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """初始化界面"""
-        self.setWindowTitle('语义文档搜索')
-        self.setMinimumSize(800, 600)
+        self.setWindowTitle('DocSeeker')
+        #启动后，窗口是最大化状态
+        self.showMaximized()
+        self.setWindowIcon(QIcon('icons/app.ico'))
         
         # 主布局
         main_widget = QWidget()
@@ -93,9 +100,10 @@ class MainWindow(QMainWindow):
             self.start_indexing()
             
     def perform_search(self):
-        """执行搜索"""
+        self.logger.info("执行搜索")
         query = self.search_input.text()
         if not query:
+            self.logger.warning("搜索内容为空")
             return
             
         self.results_list.clear()
@@ -131,7 +139,10 @@ class MainWindow(QMainWindow):
         self.index_worker.progress.connect(self.update_progress)
         self.index_worker.finished.connect(self.indexing_finished)
         self.index_worker.error.connect(self.indexing_error)
+        self.index_worker.batch_ready.connect(self.process_index_batch)
+        self.logger.info("debug：self.index_worker.batch_ready.connect(self.process_index_batch)")
         self.index_worker.start()
+        print("debug：self.index_worker.start()")
         
     def update_progress(self, value):
         """更新进度条"""
@@ -161,9 +172,16 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """窗口关闭事件处理"""
-        # 停止文件监控
-        self.file_monitor.stop()
-        event.accept()
+        try:
+            # 保存索引
+            self.search_service.save_index()
+            # 停止文件监控
+            if hasattr(self, 'file_monitor'):
+                self.file_monitor.stop()
+            event.accept()
+        except Exception as e:
+            print(f"关闭窗口时出错: {e}")
+            event.accept()
 
     def _create_menu_bar(self):
         """创建菜单栏"""
@@ -226,16 +244,11 @@ class MainWindow(QMainWindow):
                          "支持多种文档格式，实时索引更新")
 
     def _build_index(self):
-        """
-        在主线程中直接建立索引
-        不显示进度，直接构建
-        """
-        self.search_service.clear_all()
-
-
+        self.logger.info("开始建立索引")
         try:
             directories = self.config.get_scan_directories()
             if not directories:
+                self.logger.warning("未配置扫描目录")
                 QMessageBox.warning(self, "警告", "请先添加要索引的目录！")
                 return
                 
@@ -257,7 +270,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "完成", "索引建立完成！")
             
         except Exception as e:
+            self.logger.error("建立索引时出错: %s", str(e))
             QMessageBox.critical(self, "错误", f"建立索引时出错：{str(e)}")
             
         finally:
             self.setEnabled(True)  # 重新启用窗口 
+
+    def process_index_batch(self, batch: List[Dict]):
+        """在主线程中处理索引批次"""
+        try:
+            self.search_service.vector_store.add_document_batch(batch)
+        except Exception as e:
+            self.logger.error(f"处理索引批次失败: {str(e)}") 

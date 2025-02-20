@@ -3,27 +3,33 @@ from typing import List, Dict
 from tika import parser
 import PyPDF2
 from docx import Document
+from utils.logger import Logger
 
 class DocumentProcessor:
     def __init__(self, chunk_size: int = 512):
+        self.logger = Logger.get_logger(__name__)
         self.chunk_size = chunk_size
         
     def parse_document(self, file_path: str) -> Dict:
         """解析不同格式的文档"""
+        self.logger.info("解析文档: %s", file_path)
         ext = os.path.splitext(file_path)[1].lower()
         
         try:
             if ext == '.pdf':
+                self.logger.debug("使用PDF解析器")
                 return self._parse_pdf(file_path)
             elif ext in ['.docx', '.doc']:
+                self.logger.debug("使用DOCX解析器")
                 return self._parse_docx(file_path)
             elif ext == '.txt':
+                self.logger.debug("使用TXT解析器")
                 return self._parse_txt(file_path)
             else:
-                # 使用 Tika 处理其他格式
+                self.logger.debug("使用Tika解析器")
                 return self._parse_with_tika(file_path)
         except Exception as e:
-            print(f"Error processing {file_path}: {str(e)}")
+            self.logger.error("文档处理错误: %s - %s", file_path, str(e))
             return {"content": "", "metadata": {}}
 
     def _parse_pdf(self, file_path: str) -> Dict:

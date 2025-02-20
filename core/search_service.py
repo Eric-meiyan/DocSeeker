@@ -3,21 +3,30 @@ from .document_processor import DocumentProcessor
 from .embedding import EmbeddingService
 from .vector_store import VectorStore
 import os
+from utils.logger import Logger
 
 class SearchService:
-    def __init__(self):
-        """初始化搜索服务"""
+    def __init__(self, index_file: str = "faiss.index"):
+        """
+        初始化搜索服务
+        
+        Args:
+            index_file: FAISS索引文件路径
+        """
+        self.logger = Logger.get_logger(__name__)
+        self.logger.info("初始化搜索服务")
         self.doc_processor = DocumentProcessor()
         self.embedding_service = EmbeddingService()
-        self.vector_store = VectorStore()
+        self.vector_store = VectorStore(index_file=index_file)
         
     def index_document(self, file_path: str):
         """索引单个文档"""
+        self.logger.info("开始索引文档: %s", file_path)
         # 解析文档
         doc_info = self.doc_processor.parse_document(file_path)
         
         if not doc_info["content"]:
-            print(f"Warning: No content extracted from {file_path}")
+            self.logger.warning("未能从文档提取内容: %s", file_path)
             return
             
         # 分块
@@ -72,3 +81,7 @@ class SearchService:
     def clear_all(self):
         """清空所有数据"""
         self.vector_store.clear_all()   
+
+    def save_index(self):
+        """保存索引"""
+        self.vector_store.save_index()   
