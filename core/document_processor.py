@@ -1,7 +1,7 @@
 import os
 from typing import List, Dict
 from tika import parser
-import PyPDF2
+import pdfplumber
 from docx import Document
 from utils.logger import Logger
 
@@ -37,15 +37,14 @@ class DocumentProcessor:
         text = ""
         metadata = {}
         
-        with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
+        with pdfplumber.open(file_path) as pdf:
             metadata = {
-                "pages": len(pdf_reader.pages),
+                "pages": len(pdf.pages),
                 "title": os.path.basename(file_path)
             }
             
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+            for page in pdf.pages:
+                text += page.extract_text() 
                 
         return {
             "content": text,

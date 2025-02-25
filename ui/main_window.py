@@ -5,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLineEdit, QPushButton, QTextEdit, QListWidget, 
                             QFileDialog, QProgressBar, QMessageBox, QLabel,
-                            QApplication)
+                            QApplication, QTreeWidget, QTreeWidgetItem)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from typing import List, Dict
@@ -43,10 +43,27 @@ class MainWindow(QMainWindow):
         self.showMaximized()
         self.setWindowIcon(QIcon('icons/app.ico'))
         
-        # 主布局
+        # 创建主布局
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
+        main_layout = QHBoxLayout()  # 使用水平布局
+        main_widget.setLayout(main_layout)
+        
+        # 创建左侧索引管理面板
+        self.index_tree = QTreeWidget()
+        self.index_tree.setHeaderLabel("索引管理")
+        self.index_tree.setMinimumWidth(200)  # 设置最小宽度
+        
+        # 添加示例索引项
+        self.add_index_items()
+        
+        # 添加到主布局
+        main_layout.addWidget(self.index_tree)
+        
+        # 右侧搜索区域（原有的布局）
+        right_widget = QWidget()
+        right_layout = QVBoxLayout()
+        right_widget.setLayout(right_layout)
         
         # 搜索区域
         search_layout = QHBoxLayout()
@@ -56,17 +73,17 @@ class MainWindow(QMainWindow):
         self.search_button.clicked.connect(self.perform_search)
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_button)
-        layout.addLayout(search_layout)
+        right_layout.addLayout(search_layout)
         
         # 结果显示区域
         self.results_list = QListWidget()
         self.results_list.itemClicked.connect(self.show_result_detail)
-        layout.addWidget(self.results_list)
+        right_layout.addWidget(self.results_list)
         
         # 详情显示区域
         self.detail_text = QTextEdit()
         self.detail_text.setReadOnly(True)
-        layout.addWidget(self.detail_text)
+        right_layout.addWidget(self.detail_text)
         
         # 底部工具栏
         tools_layout = QHBoxLayout()
@@ -76,13 +93,15 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
         tools_layout.addWidget(self.index_button)
         tools_layout.addWidget(self.progress_bar)
-        layout.addLayout(tools_layout)
+        right_layout.addLayout(tools_layout)
         
         # 添加状态栏
         self.statusBar().showMessage('就绪')
         
         # 添加菜单栏
         self._create_menu_bar()
+        
+        main_layout.addWidget(right_widget)
         
     def show_first_run_dialog(self):
         """显示首次运行配置对话框"""
@@ -125,6 +144,10 @@ class MainWindow(QMainWindow):
         
     def start_indexing(self):
         """开始索引文档"""
+        
+        #清空索引
+        self.search_service.vector_store.clear_all()
+
         directories = self.config.get_scan_directories()
         if not directories:
             QMessageBox.warning(self, "警告", "请先添加要索引的目录！")
@@ -282,3 +305,22 @@ class MainWindow(QMainWindow):
             self.search_service.vector_store.add_document_batch(batch)
         except Exception as e:
             self.logger.error(f"处理索引批次失败: {str(e)}") 
+
+    def add_index_items(self):
+        """添加索引项目"""
+        # 创建根节点
+        ai_reports = QTreeWidgetItem(self.index_tree)
+        ai_reports.setText(0, "AI行业报告")
+        ai_reports.setCheckState(0, Qt.CheckState.Checked)
+        
+        huawei_docs = QTreeWidgetItem(self.index_tree)
+        huawei_docs.setText(0, "华为相关资料")
+        huawei_docs.setCheckState(0, Qt.CheckState.Checked)
+        
+        # 展开所有项
+        self.index_tree.expandAll()
+    
+    def on_index_item_changed(self, item, column):
+        """处理索引项选中状态变化"""
+        checked = item.checkState(0) == Qt.CheckState.Checked
+        # TODO: 根据选中状态更新搜索范围 
