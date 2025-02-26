@@ -63,7 +63,7 @@ class SearchService:
         for file in files:
             self.index_document(file)
         
-    def search(self, query: str, top_k: int = 5) -> List[Dict]:
+    def search(self, query: str, top_k: int = 50) -> List[Dict]:
         """搜索文档"""
         # 生成查询向量
         query_vector = self.embedding_service.encode(query)

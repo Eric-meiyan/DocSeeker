@@ -144,7 +144,7 @@ class VectorStore:
                 self.logger.error(f"添加文档失败: {str(e)}")
                 raise
 
-    def search(self, query_vector: np.ndarray, top_k: int = 5) -> List[Tuple[str, float, Dict]]:
+    def search(self, query_vector: np.ndarray, top_k: int = 50) -> List[Tuple[str, float, Dict]]:
         """搜索最相似的文档"""
         self.logger.info("执行搜索，top_k: %d", top_k)
         

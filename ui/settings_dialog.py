@@ -82,7 +82,6 @@ class SettingsDialog(QDialog):
         # 索引
         index = QTreeWidgetItem(self.category_tree, ['索引'])
         QTreeWidgetItem(index, ['文件类型'])
-        QTreeWidgetItem(index, ['索引目录'])
         QTreeWidgetItem(index, ['更新策略'])
         
         # 高级
@@ -155,22 +154,10 @@ class SettingsDialog(QDialog):
         self.file_types_page.setLayout(file_types_layout)
         self.stack_widget.addWidget(self.file_types_page)
         
-        # 索引目录页
+        # 索引目录页面代码可以保留，但不添加到堆栈中
         self.directories_page = QWidget()
-        directories_layout = QVBoxLayout()
-        
-        self.directories_list = QListWidget()
-        self.add_dir_button = QPushButton('添加')
-        self.remove_dir_button = QPushButton('删除')
-        
-        directories_layout.addWidget(self.directories_list)
-        dir_button_layout = QHBoxLayout()
-        dir_button_layout.addWidget(self.add_dir_button)
-        dir_button_layout.addWidget(self.remove_dir_button)
-        directories_layout.addLayout(dir_button_layout)
-        
-        self.directories_page.setLayout(directories_layout)
-        self.stack_widget.addWidget(self.directories_page)
+        # ... 索引目录设置代码 ...
+        # self.stack_widget.addWidget(self.directories_page)  # 注释掉或删除
         
         # 向量模型页
         self.model_page = QWidget()
@@ -191,8 +178,6 @@ class SettingsDialog(QDialog):
         self.model_page.setLayout(model_layout)
         self.stack_widget.addWidget(self.model_page)
         
-        # 添加其他页面...
-        
     def on_category_changed(self, current, previous):
         """处理分类切换"""
         if not current:
@@ -206,10 +191,14 @@ class SettingsDialog(QDialog):
             self.stack_widget.setCurrentWidget(self.search_page)
         elif category == '文件类型':
             self.stack_widget.setCurrentWidget(self.file_types_page)
-        elif category == '索引目录':
-            self.stack_widget.setCurrentWidget(self.directories_page)
         elif category == '向量模型':
             self.stack_widget.setCurrentWidget(self.model_page)
+        # elif category == '更新策略':
+        #     self.stack_widget.setCurrentWidget(self.update_strategy_page)
+        # elif category == '性能调优':
+        #     self.stack_widget.setCurrentWidget(self.performance_page)
+        # elif category == '调试选项':
+        #     self.stack_widget.setCurrentWidget(self.debug_page)
             
     def load_settings(self):
         """加载设置"""
@@ -228,10 +217,8 @@ class SettingsDialog(QDialog):
         for ext in self.config.get_file_extensions():
             self.file_types_list.addItem(ext)
             
-        # 加载索引目录
-        self.directories_list.clear()
-        for directory in self.config.get_scan_directories():
-            self.directories_list.addItem(directory)
+        
+    
             
         # 加载模型设置
         model_name = self.config.get_value('model.name', 'paraphrase-multilingual-MiniLM-L12-v2')
@@ -256,12 +243,6 @@ class SettingsDialog(QDialog):
         for i in range(self.file_types_list.count()):
             file_types.append(self.file_types_list.item(i).text())
         self.config.set_file_extensions(file_types)
-        
-        # 保存索引目录
-        directories = []
-        for i in range(self.directories_list.count()):
-            directories.append(self.directories_list.item(i).text())
-        self.config.set_scan_directories(directories)
         
         # 保存模型设置
         self.config.set_value('model.name', self.model_combo.currentText())

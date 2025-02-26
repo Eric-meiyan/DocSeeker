@@ -57,6 +57,8 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText('输入搜索内容...')
         self.search_button = QPushButton('搜索')
         self.search_button.clicked.connect(self.perform_search)
+        # 连接回车键到搜索功能
+        self.search_input.returnPressed.connect(self.perform_search)
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_button)
         main_layout.addLayout(search_layout)

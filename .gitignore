@@ -42,6 +42,7 @@ config.json
 models/
 logs/
 *.log
+*.index
 
 # OS specific
 .DS_Store
