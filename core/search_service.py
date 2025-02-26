@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .document_processor import DocumentProcessor
 from .embedding import EmbeddingService
 from .vector_store import VectorStore
@@ -103,3 +103,37 @@ class SearchService:
         # 重新索引所有启用的目录
         for directory in enabled_dirs:
             self.index_directory(directory)   
+
+    def get_scan_directories(self) -> List[str]:
+        """获取需要扫描的目录列表"""
+        with self.vector_store.db_lock:
+            cursor = self.vector_store.conn.cursor()
+            cursor.execute('SELECT path FROM directories WHERE enabled = 1')
+            return [row[0] for row in cursor.fetchall()]   
+
+    def get_directories(self) -> List[Dict]:
+        """获取所有目录信息"""
+        return self.vector_store.get_directories()
+        
+    def get_enabled_directories(self) -> List[str]:
+        """获取所有启用的目录"""
+        return [d['path'] for d in self.get_directories() if d['enabled']]   
+
+
+    def add_directory(self, path: str):
+        """添加目录"""
+        self.vector_store.add_directory(path)
+
+    def remove_directory(self, path: str):
+        """删除目录及其索引数据"""
+        self.vector_store.remove_directory(path)
+
+    def update_directory_status(self, path: str, enabled: bool = True,
+                              last_update: Optional[str] = None,
+                              doc_count: Optional[int] = None):
+        """更新目录状态"""
+        self.vector_store.update_directory_status(path, enabled, last_update, doc_count)
+
+    def get_enabled_directories(self) -> List[str]:
+        """获取所有启用的目录"""
+        return [d['path'] for d in self.get_directories() if d['enabled']]   

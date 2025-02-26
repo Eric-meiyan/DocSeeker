@@ -1,7 +1,7 @@
 import faiss
 import sqlite3
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import json
 import os
 from utils.logger import Logger
@@ -51,6 +51,14 @@ class VectorStore:
             metadata TEXT,
             faiss_id INTEGER NOT NULL,
             UNIQUE(file_path, chunk_index)
+        )
+        ''')
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS directories (
+            path TEXT PRIMARY KEY,
+            enabled INTEGER DEFAULT 1,
+            last_update TEXT,
+            doc_count INTEGER DEFAULT 0
         )
         ''')
         self.conn.commit()
@@ -404,3 +412,80 @@ class VectorStore:
                 self.index = faiss.IndexFlatL2(self.dimension)
                 
             return False 
+
+    def init_db(self):
+        """初始化数据库"""
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            # 创建目录表
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS directories (
+                path TEXT PRIMARY KEY,
+                enabled INTEGER DEFAULT 1,
+                last_update TEXT,
+                doc_count INTEGER DEFAULT 0
+            )
+            ''')
+            self.conn.commit()
+
+    def get_directories(self) -> List[Dict]:
+        """获取所有目录及其状态"""
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+            SELECT path, enabled, last_update, doc_count 
+            FROM directories
+            ''')
+            return [
+                {
+                    'path': row[0],
+                    'enabled': bool(row[1]),
+                    'last_update': row[2],
+                    'doc_count': row[3]
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def add_directory(self, path: str):
+        """添加目录"""
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+            INSERT OR IGNORE INTO directories (path, enabled, last_update)
+            VALUES (?, 1, NULL)
+            ''', (path,))
+            self.conn.commit()
+
+    def remove_directory(self, path: str):
+        """删除目录及其相关数据"""
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            # 删除目录记录
+            cursor.execute('DELETE FROM directories WHERE path = ?', (path,))
+            # 删除该目录下的所有文档记录
+            cursor.execute('DELETE FROM documents WHERE file_path LIKE ?', (f"{path}%",))
+            self.conn.commit()
+
+    def update_directory_status(self, path: str, enabled: bool = True, 
+                              last_update: Optional[str] = None,
+                              doc_count: Optional[int] = None):
+        """更新目录状态"""
+        with self.db_lock:
+            cursor = self.conn.cursor()
+            updates = []
+            values = []
+            if enabled is not None:
+                updates.append("enabled = ?")
+                values.append(int(enabled))
+            if last_update is not None:
+                updates.append("last_update = ?")
+                values.append(last_update)
+            if doc_count is not None:
+                updates.append("doc_count = ?")
+                values.append(doc_count)
+            
+            if updates:
+                sql = f"UPDATE directories SET {', '.join(updates)} WHERE path = ?"
+                values.append(path)
+                cursor.execute(sql, values)
+                self.conn.commit() 

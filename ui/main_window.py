@@ -265,15 +265,18 @@ class MainWindow(QMainWindow):
         dialog = IndexManagerDialog(self.search_service, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # 更新文件监控
-            enabled_dirs = self.config.get_enabled_directories()
+            enabled_dirs = self.search_service.get_enabled_directories()
             if hasattr(self, 'file_monitor'):
                 self.file_monitor.update_directories(enabled_dirs)
             
             # 更新状态栏显示
-            total_docs = sum(self.config.get_directory_settings(d)["doc_count"] 
-                            for d in enabled_dirs)
-            self.statusBar().showMessage(f'已启用 {len(enabled_dirs)} 个目录，'
-                                       f'共 {total_docs} 个文档', 3000)
+            directories = self.search_service.get_directories()
+            enabled_count = sum(1 for d in directories if d['enabled'])
+            total_docs = sum(d['doc_count'] for d in directories if d['enabled'])
+            self.statusBar().showMessage(
+                f'已启用 {enabled_count} 个目录，共 {total_docs} 个文档', 
+                3000
+            )
 
     def _show_about(self):
         """显示关于对话框"""
@@ -286,7 +289,7 @@ class MainWindow(QMainWindow):
     def _build_index(self):
         self.logger.info("开始建立索引")
         try:
-            directories = self.config.get_scan_directories()
+            directories = self.search_service.get_enabled_directories()
             if not directories:
                 self.logger.warning("未配置扫描目录")
                 QMessageBox.warning(self, "警告", "请先添加要索引的目录！")

@@ -76,19 +76,24 @@ class IndexManagerDialog(QDialog):
         """加载目录列表"""
         self.dir_tree.clear()
         
-        for directory in self.config.get_scan_directories():
+        for directory in self.search_service.get_directories():
             item = QTreeWidgetItem()
-            item.setText(0, directory)
+            item.setText(0, directory['path'])
             
             # 设置目录状态
-            enabled = self.config.is_directory_enabled(directory)
+            enabled = directory['enabled']
             item.setCheckState(0, Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
             
             # 获取目录信息
-            doc_count = self.get_document_count(directory)
-            self.config.set_directory_doc_count(directory, doc_count)  # 更新文档数量
+            doc_count = self.get_document_count(directory['path'])
+            self.search_service.update_directory_status(
+                directory['path'], 
+                doc_count=doc_count
+            )
             
-            last_update = self.config.get_directory_last_update(directory)
+            last_update = directory['last_update']
+            if last_update:
+                last_update = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
             status = "已启用" if enabled else "已禁用"
             
             item.setText(1, str(doc_count))
@@ -109,13 +114,13 @@ class IndexManagerDialog(QDialog):
         """添加新目录"""
         directory = QFileDialog.getExistingDirectory(self, "选择文档目录")
         if directory:
-            if directory in self.config.get_scan_directories():
+            # 检查是否已存在
+            existing = self.search_service.get_directories()
+            if any(d['path'] == directory for d in existing):
                 QMessageBox.warning(self, "警告", "该目录已存在！")
                 return
                 
-            self.config.add_scan_directory(directory)
-            self.config.set_directory_enabled(directory, True)
-            self.config.set_directory_last_update(directory, None)
+            self.search_service.add_directory(directory)
             self.load_directories()
             
     def remove_directory(self):
@@ -134,7 +139,7 @@ class IndexManagerDialog(QDialog):
                                    QMessageBox.StandardButton.No)
                                    
         if reply == QMessageBox.StandardButton.Yes:
-            self.config.remove_scan_directory(directory)
+            self.search_service.remove_directory(directory)
             self.load_directories()
             
     def refresh_index(self):
@@ -149,7 +154,7 @@ class IndexManagerDialog(QDialog):
             # 更新索引
             self.search_service.index_directory(directory)
             # 更新时间戳
-            self.config.set_directory_last_update(directory, datetime.now())
+            self.search_service.update_directory_status(directory, last_update=datetime.now().isoformat())
             self.load_directories()
             QMessageBox.information(self, "完成", f"目录 {directory} 的索引已更新！")
         except Exception as e:
@@ -169,8 +174,8 @@ class IndexManagerDialog(QDialog):
                 self.search_service.rebuild_index()
                 # 更新所有目录的时间戳
                 now = datetime.now()
-                for directory in self.config.get_scan_directories():
-                    self.config.set_directory_last_update(directory, now)
+                for directory in self.search_service.get_directories():
+                    self.search_service.update_directory_status(directory['path'], last_update=now.isoformat())
                 self.load_directories()
                 QMessageBox.information(self, "完成", "索引重建完成！")
             except Exception as e:
@@ -181,7 +186,7 @@ class IndexManagerDialog(QDialog):
         if column == 0:  # 复选框状态改变
             directory = item.text(0)
             enabled = item.checkState(0) == Qt.CheckState.Checked
-            self.config.set_directory_enabled(directory, enabled)
+            self.search_service.update_directory_status(directory, enabled=enabled)
             item.setText(3, "已启用" if enabled else "已禁用")
             
     def accept(self):
@@ -192,7 +197,7 @@ class IndexManagerDialog(QDialog):
                 item = self.dir_tree.topLevelItem(i)
                 directory = item.text(0)
                 enabled = item.checkState(0) == Qt.CheckState.Checked
-                self.config.set_directory_enabled(directory, enabled)
+                self.search_service.update_directory_status(directory, enabled=enabled)
             
             # 保存配置
             self.config.save_config()
@@ -219,12 +224,12 @@ class IndexManagerDialog(QDialog):
                     return
                     
             # 检查文件实际存在性
-            for directory in self.config.get_scan_directories():
-                if not os.path.exists(directory):
+            for directory in self.search_service.get_directories():
+                if not os.path.exists(directory['path']):
                     QMessageBox.warning(
                         self,
                         "目录不存在",
-                        f"目录不存在: {directory}\n建议从索引中移除此目录。"
+                        f"目录不存在: {directory['path']}\n建议从索引中移除此目录。"
                     )
                     
         except Exception as e:

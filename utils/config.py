@@ -4,14 +4,9 @@ from typing import Dict, List, Optional
 from datetime import datetime
 
 class Config:
-    def __init__(self, config_file: str = "config.json"):
-        self.config_file = config_file
-        self.config = self._load_config()
-        
-    def _load_config(self) -> Dict:
-        """加载配置文件"""
-        default_config = {
-            "scan_directories": ["D:\\test\\docs"],
+    def __init__(self):
+        self.config_file = "config.json"
+        self.default_config = {
             "file_extensions": [".pdf", ".docx", ".doc", ".txt", ".pptx"],
             "model_name": "paraphrase-multilingual-MiniLM-L12-v2",
             "chunk_size": 512,
@@ -19,18 +14,17 @@ class Config:
             "index_path": "documents.db",
             "first_run": True
         }
+        # 移除 scan_directories 配置项
         
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
-                    loaded_config = json.load(f)
-                    # 合并默认配置和加载的配置
-                    default_config.update(loaded_config)
+                    self.config = json.load(f)
             except Exception as e:
-                print(f"Error loading config: {str(e)}")
-                
-        return default_config
-    
+                self.config = self.default_config.copy()
+        else:
+            self.config = self.default_config.copy()
+        
     def save_config(self):
         """保存配置到文件"""
         try:
@@ -38,22 +32,6 @@ class Config:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
         except Exception as e:
             print(f"Error saving config: {str(e)}")
-            
-    def get_scan_directories(self) -> List[str]:
-        """获取扫描目录列表"""
-        return self.config.get("scan_directories", [])
-    
-    def add_scan_directory(self, directory: str):
-        """添加扫描目录"""
-        if os.path.exists(directory) and directory not in self.config["scan_directories"]:
-            self.config["scan_directories"].append(directory)
-            self.save_config()
-            
-    def remove_scan_directory(self, directory: str):
-        """移除扫描目录"""
-        if directory in self.config["scan_directories"]:
-            self.config["scan_directories"].remove(directory)
-            self.save_config()
             
     def get_file_extensions(self) -> List[str]:
         """获取支持的文件扩展名"""
@@ -102,14 +80,6 @@ class Config:
                 config[k] = {}
             config = config[k]
         config[keys[-1]] = value
-
-    def set_scan_directories(self, directories: List[str]):
-        """设置扫描目录列表"""
-        self.config["scan_directories"] = directories
-        
-    def set_file_extensions(self, extensions: List[str]):
-        """设置文件类型列表"""
-        self.config["file_extensions"] = extensions 
 
     def get_directory_settings(self, directory: str) -> Dict:
         """获取目录的完整设置"""
