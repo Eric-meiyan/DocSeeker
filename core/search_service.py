@@ -47,17 +47,22 @@ class SearchService:
             metadata=doc_info["metadata"]
         )
         
-    def index_directory(self, directory: str, file_extensions: List[str] = None):
-        """索引整个目录"""
-        if file_extensions is None:
-            file_extensions = ['.pdf', '.docx', '.doc', '.txt', '.pptx']
-            
-        for root, _, files in os.walk(directory):
-            for file in files:
-                if any(file.lower().endswith(ext) for ext in file_extensions):
-                    file_path = os.path.join(root, file)
-                    self.index_document(file_path)
-                    
+    def index_directory(self, directory: str):
+        """索引单个目录"""
+        if not os.path.exists(directory):
+            raise FileNotFoundError(f"目录不存在: {directory}")
+        
+        # 获取目录下的所有文件
+        files = []
+        for root, _, filenames in os.walk(directory):
+            for filename in filenames:
+                if any(filename.lower().endswith(ext) for ext in self.config.get_file_extensions()):
+                    files.append(os.path.join(root, filename))
+                
+        # 处理所有文件
+        for file in files:
+            self.index_document(file)
+        
     def search(self, query: str, top_k: int = 5) -> List[Dict]:
         """搜索文档"""
         # 生成查询向量
@@ -85,3 +90,16 @@ class SearchService:
     def save_index(self):
         """保存索引"""
         self.vector_store.save_index()   
+
+    def rebuild_index(self):
+        """重建所有索引"""
+        # 清空现有索引
+        self.vector_store.clear_all()
+        
+        # 获取所有启用的目录
+        enabled_dirs = [d for d in self.config.get_scan_directories() 
+                       if self.config.is_directory_enabled(d)]
+        
+        # 重新索引所有启用的目录
+        for directory in enabled_dirs:
+            self.index_directory(directory)   

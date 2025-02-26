@@ -7,6 +7,7 @@ import os
 from utils.logger import Logger
 from queue import Queue
 from threading import Lock
+import tempfile
 
 class VectorStore:
     def __init__(self, dimension: int = 384, index_file: str = "faiss.index"):
@@ -102,34 +103,53 @@ class VectorStore:
                     metadata: Dict = None):
         """添加文档到存储"""
         self.logger.info("添加文档: %s, 块数: %d", file_path, len(chunks))
-        cursor = self.conn.cursor()
         
-        # 获取当前FAISS索引的大小作为起始ID
-        start_idx = self.index.ntotal
-        
-        # 添加向量到FAISS
-        self.index.add(embeddings)
-        
-        # 添加文档信息到SQLite
-        for i, chunk in enumerate(chunks):
-            cursor.execute('''
-            INSERT OR REPLACE INTO documents (file_path, chunk_index, chunk_text, metadata, faiss_id)
-            VALUES (?, ?, ?, ?, ?)
-            ''', (file_path, i, chunk, json.dumps(metadata or {}), start_idx + i))
-            
-        self.conn.commit()
-
-        print(f"添加文档后，FAISS索引中的向量数量: {self.index.ntotal}")
+        with self.db_lock:  # 使用锁确保线程安全
+            cursor = self.conn.cursor()
+            try:
+                # 开始事务
+                cursor.execute('BEGIN TRANSACTION')
+                
+                # 获取当前FAISS索引的大小作为起始ID
+                start_idx = self.index.ntotal
+                
+                # 添加向量到FAISS
+                self.index.add(embeddings)
+                
+                # 添加文档信息到SQLite
+                for i, chunk in enumerate(chunks):
+                    cursor.execute('''
+                    INSERT OR REPLACE INTO documents (file_path, chunk_index, chunk_text, metadata, faiss_id)
+                    VALUES (?, ?, ?, ?, ?)
+                    ''', (file_path, i, chunk, json.dumps(metadata or {}), start_idx + i))
+                    
+                # 提交事务
+                self.conn.commit()
+                self.logger.info(f"添加文档成功，FAISS索引中的向量数量: {self.index.ntotal}")
+                
+            except Exception as e:
+                # 回滚事务
+                cursor.execute('ROLLBACK')
+                # 回滚FAISS索引 - 移除刚添加的向量
+                if self.index.ntotal > start_idx:
+                    self._rollback_faiss(start_idx)
+                self.logger.error(f"添加文档失败: {str(e)}")
+                raise
 
     def search(self, query_vector: np.ndarray, top_k: int = 5) -> List[Tuple[str, float, Dict]]:
         """搜索最相似的文档"""
         self.logger.info("执行搜索，top_k: %d", top_k)
-       
-        #打印index中的向量数量
+        
+         #打印index中的向量数量
         print(f"FAISS索引中的向量数量: {self.index.ntotal}")
 
         #检查数据库状态
-        self.debug_check_database()
+        #self.debug_check_database()
+
+        # 检查索引是否为空
+        if self.index.ntotal == 0:
+            self.logger.warning("FAISS索引为空，无法执行搜索")
+            return []
         
         # 搜索最相似的向量
         distances, indices = self.index.search(query_vector.reshape(1, -1), top_k)
@@ -183,6 +203,9 @@ class VectorStore:
                         "metadata": json.loads(metadata)
                     }
                 ))
+            else:
+                # 记录不一致问题
+                self.logger.error(f"数据不一致: FAISS索引包含ID {idx}，但在数据库中未找到对应记录")
                 
         return results
 
@@ -224,3 +247,160 @@ class VectorStore:
         print("数据库中的记录:")
         for record in records:
             print(f"faiss_id: {record[0]}, file_path: {record[1]}") 
+
+    def _rollback_faiss(self, original_size):
+        """回滚FAISS索引到指定大小"""
+        if self.index.ntotal <= original_size:
+            return
+        
+        # 创建新索引并只复制原始大小的向量
+        temp_index = faiss.IndexFlatL2(self.dimension)
+        
+        if original_size > 0:
+            # 获取原始向量
+            vectors = faiss.rev_swig_ptr(self.index.get_xb(), original_size * self.dimension)
+            vectors = vectors.reshape(original_size, self.dimension)
+            
+            # 添加到新索引
+            temp_index.add(vectors)
+        
+        # 替换当前索引
+        self.index = temp_index
+        self.logger.info(f"FAISS索引已回滚到 {original_size} 个向量") 
+
+    def check_consistency(self):
+        """检查FAISS索引和SQLite数据库的一致性"""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT COUNT(DISTINCT faiss_id) FROM documents')
+        db_count = cursor.fetchone()[0]
+        
+        faiss_count = self.index.ntotal
+        
+        if db_count != faiss_count:
+            self.logger.warning(f"数据不一致: FAISS索引包含 {faiss_count} 个向量，但数据库有 {db_count} 条记录")
+            return False
+        
+        # 检查faiss_id范围
+        cursor.execute('SELECT MIN(faiss_id), MAX(faiss_id) FROM documents')
+        min_id, max_id = cursor.fetchone()
+        
+        if min_id is not None and max_id is not None:
+            if min_id != 0 or max_id != faiss_count - 1:
+                self.logger.warning(f"数据ID不连续: faiss_id范围 [{min_id}, {max_id}]，但索引大小为 {faiss_count}")
+                return False
+        
+        self.logger.info(f"数据一致性检查通过: {faiss_count} 个向量")
+        return True 
+
+    def export_data(self, index_path: str, db_path: str) -> bool:
+        """导出FAISS索引和SQLite数据库"""
+        try:
+            with self.db_lock:
+                # 确保目录存在
+                index_dir = os.path.dirname(index_path)
+                db_dir = os.path.dirname(db_path)
+                
+                os.makedirs(index_dir, exist_ok=True)
+                os.makedirs(db_dir, exist_ok=True)
+                
+                # 标准化路径格式
+                index_path = os.path.normpath(index_path)
+                db_path = os.path.normpath(db_path)
+                
+                # 处理中文路径问题
+                # 方案一：尝试使用临时文件
+                temp_index_path = os.path.join(tempfile.gettempdir(), "temp_faiss.index")
+                
+                # 导出FAISS索引到临时文件
+                faiss.write_index(self.index, temp_index_path)
+                self.logger.info(f"FAISS索引已导出到临时文件，包含 {self.index.ntotal} 个向量")
+                
+                # 复制到目标位置
+                import shutil
+                shutil.copy2(temp_index_path, index_path)
+                os.remove(temp_index_path)
+                
+                # 导出SQLite数据库
+                dest_conn = sqlite3.connect(db_path)
+                with dest_conn:
+                    self.conn.backup(dest_conn)
+                dest_conn.close()
+                
+                self.logger.info(f"数据导出完成")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"导出数据失败: {str(e)}")
+            return False
+        
+    def import_data(self, index_path: str, db_path: str) -> bool:
+        """导入FAISS索引和SQLite数据库
+        
+        Args:
+            index_path: FAISS索引文件路径
+            db_path: SQLite数据库文件路径
+            
+        Returns:
+            bool: 是否成功导入
+        """
+        try:
+            with self.db_lock:
+                # 首先检查文件是否存在
+                if not os.path.exists(index_path) or not os.path.exists(db_path):
+                    self.logger.error("导入文件不存在")
+                    return False
+                    
+                # 关闭当前连接
+                self.conn.close()
+                
+                # 导入FAISS索引
+                self.index = faiss.read_index(index_path)
+                self.logger.info(f"已导入FAISS索引，包含 {self.index.ntotal} 个向量")
+                
+                # 备份当前数据库
+                if os.path.exists('documents.db'):
+                    backup_path = 'documents.db.bak'
+                    if os.path.exists(backup_path):
+                        os.remove(backup_path)
+                    os.rename('documents.db', backup_path)
+                    self.logger.info(f"已备份原数据库为 {backup_path}")
+                
+                # 复制新数据库
+                import shutil
+                shutil.copy2(db_path, 'documents.db')
+                self.logger.info(f"已导入SQLite数据库")
+                
+                # 重新连接数据库
+                self._setup_database()
+                
+                # 验证一致性
+                is_consistent = self.check_consistency()
+                self.logger.info(f"导入后数据一致性检查: {is_consistent}")
+                
+                return is_consistent
+                
+        except Exception as e:
+            self.logger.error(f"导入数据失败: {str(e)}")
+            # 尝试恢复数据库
+            if os.path.exists('documents.db.bak'):
+                if os.path.exists('documents.db'):
+                    os.remove('documents.db')
+                os.rename('documents.db.bak', 'documents.db')
+                self.logger.info("已从备份恢复数据库")
+                
+            # 重新连接数据库
+            try:
+                self._setup_database()
+            except:
+                pass
+                
+            # 重新加载原始索引
+            try:
+                if os.path.exists(self.index_file):
+                    self.index = faiss.read_index(self.index_file)
+                else:
+                    self.index = faiss.IndexFlatL2(self.dimension)
+            except:
+                self.index = faiss.IndexFlatL2(self.dimension)
+                
+            return False 

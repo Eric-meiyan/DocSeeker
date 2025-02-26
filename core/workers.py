@@ -92,11 +92,11 @@ class IndexingWorker(QThread):
                             })
                             self.logger.info(f"文件 {file_path} 添加到批次中。")
                             
-                            # 如果达到批处理大小，发送数据
+                            # 如果达到批处理大小，处理批次
                             if len(self.current_batch) >= self.batch_size:
-                                self.batch_ready.emit(self.current_batch)
+                                self.search_service.vector_store.add_document_batch(self.current_batch)
                                 self.current_batch = []
-                                self.logger.info("批次数据已发送。")
+                                self.logger.info("批次数据已处理。")
                             
                             processed_files += 1
                             progress = int((processed_files / total_files) * 100)
@@ -108,7 +108,7 @@ class IndexingWorker(QThread):
                             
             # 处理最后的批次
             if self.current_batch:
-                self.batch_ready.emit(self.current_batch)
+                self.search_service.vector_store.add_document_batch(self.current_batch)
                 self.logger.info("发送最后的批次数据。")
                 
             self.finished.emit()

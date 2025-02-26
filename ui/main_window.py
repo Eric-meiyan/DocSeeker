@@ -2,10 +2,10 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+from PyQt6.QtWidgets import (QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLineEdit, QPushButton, QTextEdit, QListWidget, 
                             QFileDialog, QProgressBar, QMessageBox, QLabel,
-                            QApplication, QTreeWidget, QTreeWidgetItem)
+                            QApplication)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QIcon
 from typing import List, Dict
@@ -14,6 +14,9 @@ from core.workers import IndexingWorker
 from utils.config import Config
 from utils.file_monitor import FileMonitor
 from utils.logger import Logger
+from ui.settings_dialog import SettingsDialog
+from .index_manager import IndexManagerDialog
+from datetime import datetime
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -39,31 +42,14 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化界面"""
         self.setWindowTitle('DocSeeker')
-        #启动后，窗口是最大化状态
         self.showMaximized()
         self.setWindowIcon(QIcon('icons/app.ico'))
         
         # 创建主布局
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout()  # 使用水平布局
+        main_layout = QVBoxLayout()  # 改回垂直布局
         main_widget.setLayout(main_layout)
-        
-        # 创建左侧索引管理面板
-        self.index_tree = QTreeWidget()
-        self.index_tree.setHeaderLabel("索引管理")
-        self.index_tree.setMinimumWidth(200)  # 设置最小宽度
-        
-        # 添加示例索引项
-        self.add_index_items()
-        
-        # 添加到主布局
-        main_layout.addWidget(self.index_tree)
-        
-        # 右侧搜索区域（原有的布局）
-        right_widget = QWidget()
-        right_layout = QVBoxLayout()
-        right_widget.setLayout(right_layout)
         
         # 搜索区域
         search_layout = QHBoxLayout()
@@ -73,36 +59,80 @@ class MainWindow(QMainWindow):
         self.search_button.clicked.connect(self.perform_search)
         search_layout.addWidget(self.search_input)
         search_layout.addWidget(self.search_button)
-        right_layout.addLayout(search_layout)
+        main_layout.addLayout(search_layout)
         
         # 结果显示区域
         self.results_list = QListWidget()
         self.results_list.itemClicked.connect(self.show_result_detail)
-        right_layout.addWidget(self.results_list)
+        main_layout.addWidget(self.results_list)
         
         # 详情显示区域
         self.detail_text = QTextEdit()
         self.detail_text.setReadOnly(True)
-        right_layout.addWidget(self.detail_text)
+        main_layout.addWidget(self.detail_text)
         
         # 底部工具栏
         tools_layout = QHBoxLayout()
         self.index_button = QPushButton('更新索引')
         self.index_button.clicked.connect(self.start_indexing)
-        self.progress_bar = QProgressBar()
-        self.progress_bar.hide()
         tools_layout.addWidget(self.index_button)
+        
+        # 进度条
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
         tools_layout.addWidget(self.progress_bar)
-        right_layout.addLayout(tools_layout)
         
-        # 添加状态栏
-        self.statusBar().showMessage('就绪')
+        main_layout.addLayout(tools_layout)
         
-        # 添加菜单栏
+        # 创建菜单栏
         self._create_menu_bar()
         
-        main_layout.addWidget(right_widget)
+    def _create_menu_bar(self):
+        """创建菜单栏"""
+        menubar = self.menuBar()
         
+        # 文件菜单
+        file_menu = menubar.addMenu('文件')
+        
+        add_dir_action = file_menu.addAction('添加目录')
+        add_dir_action.triggered.connect(self._add_directory)
+        
+        manage_dirs_action = file_menu.addAction('管理目录')
+        manage_dirs_action.triggered.connect(self._manage_directories)
+        
+        # 添加建立索引菜单项
+        index_action = file_menu.addAction('建立索引')
+        index_action.triggered.connect(self._build_index)
+        
+        file_menu.addSeparator()
+        
+        # 添加导入导出菜单
+        export_action = file_menu.addAction('导出数据')
+        export_action.triggered.connect(self._export_data)
+        
+        import_action = file_menu.addAction('导入数据')
+        import_action.triggered.connect(self._import_data)
+        
+        file_menu.addSeparator()
+        
+        exit_action = file_menu.addAction('退出')
+        exit_action.triggered.connect(self.close)
+        
+        # 设置菜单
+        settings_menu = menubar.addMenu('设置')
+        
+        index_manage_action = settings_menu.addAction('索引管理') 
+        index_manage_action.triggered.connect(self._index_manage)
+
+        file_types_action = settings_menu.addAction('选项')
+        file_types_action.triggered.connect(self._manage_file_types)
+        
+        # 帮助菜单
+        help_menu = menubar.addMenu('帮助')
+        
+        about_action = help_menu.addAction('关于')
+        about_action.triggered.connect(self._show_about)
+
     def show_first_run_dialog(self):
         """显示首次运行配置对话框"""
         msg = QMessageBox()
@@ -144,10 +174,7 @@ class MainWindow(QMainWindow):
         
     def start_indexing(self):
         """开始索引文档"""
-        
-        #清空索引
         self.search_service.vector_store.clear_all()
-
         directories = self.config.get_scan_directories()
         if not directories:
             QMessageBox.warning(self, "警告", "请先添加要索引的目录！")
@@ -163,9 +190,7 @@ class MainWindow(QMainWindow):
         self.index_worker.finished.connect(self.indexing_finished)
         self.index_worker.error.connect(self.indexing_error)
         self.index_worker.batch_ready.connect(self.process_index_batch)
-        self.logger.info("debug：self.index_worker.batch_ready.connect(self.process_index_batch)")
         self.index_worker.start()
-        print("debug：self.index_worker.start()")
         
     def update_progress(self, value):
         """更新进度条"""
@@ -173,6 +198,11 @@ class MainWindow(QMainWindow):
         
     def indexing_finished(self):
         """索引完成处理"""
+        # 更新所有已处理目录的时间戳
+        now = datetime.now()
+        for directory in self.config.get_scan_directories():
+            self.config.set_directory_last_update(directory, now)
+        
         self.index_button.setEnabled(True)
         self.progress_bar.hide()
         QMessageBox.information(self, "完成", "文档索引更新完成！")
@@ -189,7 +219,10 @@ class MainWindow(QMainWindow):
             if event_type in ['created', 'modified']:
                 # 更新单个文件的索引
                 self.search_service.index_document(file_path)
-                self.status_bar().showMessage(f"已更新文件索引: {os.path.basename(file_path)}", 3000)
+                # 更新目录时间戳
+                directory = os.path.dirname(file_path)
+                self.config.set_directory_last_update(directory, datetime.now())
+                self.statusBar().showMessage(f"已更新文件索引: {os.path.basename(file_path)}", 3000)
         except Exception as e:
             self.status_bar().showMessage(f"索引更新失败: {str(e)}", 5000)
 
@@ -206,40 +239,6 @@ class MainWindow(QMainWindow):
             print(f"关闭窗口时出错: {e}")
             event.accept()
 
-    def _create_menu_bar(self):
-        """创建菜单栏"""
-        menubar = self.menuBar()
-        
-        # 文件菜单
-        file_menu = menubar.addMenu('文件')
-        
-        add_dir_action = file_menu.addAction('添加目录')
-        add_dir_action.triggered.connect(self._add_directory)
-        
-        manage_dirs_action = file_menu.addAction('管理目录')
-        manage_dirs_action.triggered.connect(self._manage_directories)
-        
-        # 添加建立索引菜单项
-        index_action = file_menu.addAction('建立索引')
-        index_action.triggered.connect(self._build_index)
-        
-        file_menu.addSeparator()
-        
-        exit_action = file_menu.addAction('退出')
-        exit_action.triggered.connect(self.close)
-        
-        # 设置菜单
-        settings_menu = menubar.addMenu('设置')
-        
-        file_types_action = settings_menu.addAction('文件类型')
-        file_types_action.triggered.connect(self._manage_file_types)
-        
-        # 帮助菜单
-        help_menu = menubar.addMenu('帮助')
-        
-        about_action = help_menu.addAction('关于')
-        about_action.triggered.connect(self._show_about)
-
     def _add_directory(self):
         """添加新的扫描目录"""
         directory = QFileDialog.getExistingDirectory(self, "选择文档目录")
@@ -255,8 +254,26 @@ class MainWindow(QMainWindow):
 
     def _manage_file_types(self):
         """管理文件类型"""
-        # 这里可以添加一个新的对话框来管理文件类型
-        pass
+        dialog = SettingsDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            print("选项框确认")
+        else:
+            print("选项框取消")
+    
+    def _index_manage(self):
+        """打开索引管理器"""
+        dialog = IndexManagerDialog(self.search_service, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 更新文件监控
+            enabled_dirs = self.config.get_enabled_directories()
+            if hasattr(self, 'file_monitor'):
+                self.file_monitor.update_directories(enabled_dirs)
+            
+            # 更新状态栏显示
+            total_docs = sum(self.config.get_directory_settings(d)["doc_count"] 
+                            for d in enabled_dirs)
+            self.statusBar().showMessage(f'已启用 {len(enabled_dirs)} 个目录，'
+                                       f'共 {total_docs} 个文档', 3000)
 
     def _show_about(self):
         """显示关于对话框"""
@@ -306,21 +323,90 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.logger.error(f"处理索引批次失败: {str(e)}") 
 
-    def add_index_items(self):
-        """添加索引项目"""
-        # 创建根节点
-        ai_reports = QTreeWidgetItem(self.index_tree)
-        ai_reports.setText(0, "AI行业报告")
-        ai_reports.setCheckState(0, Qt.CheckState.Checked)
+    def _export_data(self):
+        """导出索引和数据库"""
+        try:
+            export_dir = QFileDialog.getExistingDirectory(self, "选择导出目录")
+            if not export_dir:
+                return
+            
+            # 标准化路径格式
+            export_dir = os.path.normpath(export_dir)
+            
+            # 确保目录存在
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # 提示用户正在处理
+            self.statusBar().showMessage('正在导出数据...')
+            self.setEnabled(False)  # 禁用界面
+            
+            # 生成没有中文字符的文件名
+            # 可以改用时间戳或其他方式命名
+            import time
+            timestamp = int(time.time())
+            index_path = os.path.join(export_dir, f"faiss_export_{timestamp}.index")
+            db_path = os.path.join(export_dir, f"sqlite_export_{timestamp}.db")
+            
+            # 调用导出方法
+            success = self.search_service.vector_store.export_data(index_path, db_path)
+            
+            if success:
+                self.statusBar().showMessage('数据导出成功', 3000)
+                QMessageBox.information(self, "成功", f"数据已导出到:\n{export_dir}")
+            else:
+                self.statusBar().showMessage('数据导出失败', 3000)
+                QMessageBox.warning(self, "失败", "数据导出过程中出现错误")
         
-        huawei_docs = QTreeWidgetItem(self.index_tree)
-        huawei_docs.setText(0, "华为相关资料")
-        huawei_docs.setCheckState(0, Qt.CheckState.Checked)
+        except Exception as e:
+            self.logger.error(f"导出数据时出错: {str(e)}")
+            QMessageBox.critical(self, "错误", f"导出数据时出错：{str(e)}")
         
-        # 展开所有项
-        self.index_tree.expandAll()
-    
-    def on_index_item_changed(self, item, column):
-        """处理索引项选中状态变化"""
-        checked = item.checkState(0) == Qt.CheckState.Checked
-        # TODO: 根据选中状态更新搜索范围 
+        finally:
+            self.setEnabled(True)  # 重新启用界面
+
+    def _import_data(self):
+        """导入索引和数据库"""
+        try:
+            import_dir = QFileDialog.getExistingDirectory(self, "选择导入目录")
+            if not import_dir:
+                return
+            
+            index_path = os.path.join(import_dir, "faiss_export.index")
+            db_path = os.path.join(import_dir, "sqlite_export.db")
+            
+            # 检查文件是否存在
+            if not os.path.exists(index_path) or not os.path.exists(db_path):
+                QMessageBox.warning(self, "文件不存在", 
+                                  f"导入目录中缺少必要的文件:\n"
+                                  f"{'faiss_export.index 不存在' if not os.path.exists(index_path) else ''}\n"
+                                  f"{'sqlite_export.db 不存在' if not os.path.exists(db_path) else ''}")
+                return
+            
+            # 确认导入操作
+            reply = QMessageBox.question(self, '确认导入', 
+                                       "导入将覆盖当前的索引和数据库，确定继续吗？", 
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                       QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.No:
+                return
+            
+            self.statusBar().showMessage('正在导入数据...')
+            self.setEnabled(False)  # 禁用界面
+            
+            # 调用vector_store的导入方法
+            success = self.search_service.vector_store.import_data(index_path, db_path)
+            
+            if success:
+                self.statusBar().showMessage('数据导入成功', 3000)
+                QMessageBox.information(self, "成功", "数据导入成功")
+            else:
+                self.statusBar().showMessage('数据导入失败', 3000)
+                QMessageBox.warning(self, "失败", "数据导入过程中出现错误")
+            
+        except Exception as e:
+            self.logger.error(f"导入数据时出错: {str(e)}")
+            QMessageBox.critical(self, "错误", f"导入数据时出错：{str(e)}")
+            
+        finally:
+            self.setEnabled(True)  # 重新启用界面 
