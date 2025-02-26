@@ -27,7 +27,7 @@ class IndexManagerDialog(QDialog):
         
         # 目录列表
         self.dir_tree = QTreeWidget()
-        self.dir_tree.setHeaderLabels(['目录', '文档数量', '上次更新时间', '状态'])
+        self.dir_tree.setHeaderLabels(['目录', '文档数量', '上次更新时间', '检索'])
         self.dir_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.dir_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.dir_tree.header().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
@@ -80,11 +80,8 @@ class IndexManagerDialog(QDialog):
             item = QTreeWidgetItem()
             item.setText(0, directory['path'])
             
-            # 设置目录状态
-            enabled = directory['enabled']
-            item.setCheckState(0, Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
-            
             # 获取目录信息
+            enabled = directory['enabled']
             doc_count = self.get_document_count(directory['path'])
             self.search_service.update_directory_status(
                 directory['path'], 
@@ -93,12 +90,30 @@ class IndexManagerDialog(QDialog):
             
             last_update = directory['last_update']
             if last_update:
-                last_update = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
-            status = "已启用" if enabled else "已禁用"
+                # 尝试解析不同格式的时间戳
+                try:
+                    # 首先尝试标准格式
+                    last_update = datetime.strptime(last_update, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    try:
+                        # 尝试ISO格式
+                        last_update = datetime.fromisoformat(last_update)
+                    except ValueError:
+                        # 如果都失败，则视为无效
+                        last_update = None
             
+            # 设置各列内容
             item.setText(1, str(doc_count))
             item.setText(2, last_update.strftime("%Y-%m-%d %H:%M:%S") if last_update else "从未")
-            item.setText(3, status)
+            
+            # 将复选框移到最后一列"检索"中
+            # 如果索引从未构建过(last_update为None)，则复选框不能选
+            if last_update is None:
+                # 设置为不可选的复选框
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
+                item.setText(3, "需先建立索引")
+            else:
+                item.setCheckState(3, Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
             
             self.dir_tree.addTopLevelItem(item)
         
@@ -183,20 +198,19 @@ class IndexManagerDialog(QDialog):
 
     def on_item_changed(self, item: QTreeWidgetItem, column: int):
         """处理目录项状态变化"""
-        if column == 0:  # 复选框状态改变
+        if column == 3:  # 复选框状态改变 - 从第0列改为第3列
             directory = item.text(0)
-            enabled = item.checkState(0) == Qt.CheckState.Checked
+            enabled = item.checkState(3) == Qt.CheckState.Checked
             self.search_service.update_directory_status(directory, enabled=enabled)
-            item.setText(3, "已启用" if enabled else "已禁用")
             
     def accept(self):
         """确定按钮处理"""
         try:
-            # 保存所有目录的状态
+            # 保存所有目录的状态 - 从第0列改为第3列
             for i in range(self.dir_tree.topLevelItemCount()):
                 item = self.dir_tree.topLevelItem(i)
                 directory = item.text(0)
-                enabled = item.checkState(0) == Qt.CheckState.Checked
+                enabled = item.checkState(3) == Qt.CheckState.Checked
                 self.search_service.update_directory_status(directory, enabled=enabled)
             
             # 保存配置

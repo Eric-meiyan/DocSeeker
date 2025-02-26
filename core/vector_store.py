@@ -220,10 +220,11 @@ class VectorStore:
     def save_index(self):
         """保存FAISS索引到文件"""
         try:
+            self.logger.info(f"正在保存索引到 {os.path.abspath(self.index_file)}")
             faiss.write_index(self.index, self.index_file)
-            print(f"索引已保存，包含 {self.index.ntotal} 个向量")
+            self.logger.info(f"索引已保存，包含 {self.index.ntotal} 个向量")
         except Exception as e:
-            print(f"保存索引失败: {e}")
+            self.logger.error(f"保存索引失败: {e}")
             
     def clear_all(self):
         """清空所有数据"""

@@ -291,7 +291,7 @@ class MainWindow(QMainWindow):
     def _build_index(self):
         self.logger.info("开始建立索引")
         try:
-            directories = self.search_service.get_enabled_directories()
+            directories = self.search_service.get_directories()
             if not directories:
                 self.logger.warning("未配置扫描目录")
                 QMessageBox.warning(self, "警告", "请先添加要索引的目录！")
@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
             
             # 直接在主线程中处理所有文件
             for directory in directories:
-                for root, _, files in os.walk(directory):
+                for root, _, files in os.walk(directory['path']):
                     for file in files:
                         if any(file.lower().endswith(ext) for ext in self.config.get_file_extensions()):
                             file_path = os.path.join(root, file)
@@ -310,6 +310,14 @@ class MainWindow(QMainWindow):
                                 self.search_service.index_document(file_path)
                             except Exception as e:
                                 print(f"Error processing {file}: {str(e)}")
+            
+            # 添加更新时间戳代码
+            now = datetime.now()
+            for directory in directories:
+                self.search_service.update_directory_status(directory['path'], last_update=now.isoformat())
+            
+            # 显式保存索引
+            self.search_service.save_index()
             
             self.statusBar().showMessage('索引建立完成', 3000)
             QMessageBox.information(self, "完成", "索引建立完成！")

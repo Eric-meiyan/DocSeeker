@@ -6,7 +6,7 @@ import os
 from utils.logger import Logger
 
 class SearchService:
-    def __init__(self, index_file: str = "faiss.index"):
+    def __init__(self, index_file: str = os.path.join(os.getcwd(), "faiss.index")):
         """
         初始化搜索服务
         
@@ -115,9 +115,7 @@ class SearchService:
         """获取所有目录信息"""
         return self.vector_store.get_directories()
         
-    def get_enabled_directories(self) -> List[str]:
-        """获取所有启用的目录"""
-        return [d['path'] for d in self.get_directories() if d['enabled']]   
+
 
 
     def add_directory(self, path: str):
@@ -137,3 +135,4 @@ class SearchService:
     def get_enabled_directories(self) -> List[str]:
         """获取所有启用的目录"""
         return [d['path'] for d in self.get_directories() if d['enabled']]   
+
